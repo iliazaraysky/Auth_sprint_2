@@ -1,33 +1,25 @@
-import os
-import flask
 import string
 import random
-import pathlib
 from config import db
+from config.settings import GoogleOAuth
+from config import oauth
+from flask import url_for
 from models.user import User, SocialAccount, UserHistory
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import generate_password_hash
 
+from flask import Blueprint
 from flask import request, jsonify
 from flask_jwt_extended import (create_access_token, create_refresh_token)
 
-from flask import Blueprint
-from flask import redirect, session
+blueprint = Blueprint('google_oauth', __name__, url_prefix='/auth/v1/google')\
 
-import google_auth_oauthlib.flow
-import googleapiclient.discovery
-
-# client_secret_google.json у каждого свой,
-# скачивается, когда создается приложение в Google Cloud Platform
-
-CLIENT_SECRETS_FILE = os.path.join(pathlib.Path(__file__).parent,
-                                   'client_secret_google.json')
-
-SCOPES = ['https://www.googleapis.com/auth/userinfo.email',
-          'https://www.googleapis.com/auth/userinfo.profile',
-          'openid']
-
-blueprint = Blueprint('google_oauth', __name__, url_prefix='/auth/v1/google')
-API_VERSION = 'v1'
+google = oauth.register(
+    name=GoogleOAuth.GOOGLE_NAME,
+    server_metadata_url=GoogleOAuth.GOOGLE_SERVER_META_DATA_URL,
+    client_id=GoogleOAuth.GOOGLE_CLIENT_ID,
+    client_secret=GoogleOAuth.GOOGLE_CLIENT_SECRET,
+    client_kwargs={'scope': 'openid profile email'}
+)
 
 
 def generate_random_password():
@@ -114,59 +106,27 @@ def social_create_or_login(profile_data):
                    refresh_token=tokens['refresh_token'])
 
 
+@blueprint.route('/login')
+def login():
+    google = oauth.create_client('google')
+    redirect_uri = url_for('google_oauth.authorize', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+
 @blueprint.route('/authorize')
-def google_authorize():
-    flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
-        client_secrets_file=CLIENT_SECRETS_FILE,
-        scopes=['https://www.googleapis.com/auth/userinfo.email',
-                'https://www.googleapis.com/auth/userinfo.profile',
-                'openid'],
-        redirect_uri='http://127.0.0.1/auth/v1/google/oauth2callback'
-    )
-
-    authorization_url, state = flow.authorization_url(
-        include_granted_scopes='true')
-    session['state'] = state
-    return redirect(authorization_url)
-
-
-@blueprint.route('/oauth2callback')
-def google_oauth2callback():
-    state = flask.session['state']
-    flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
-        client_secrets_file=CLIENT_SECRETS_FILE,
-        scopes=['https://www.googleapis.com/auth/userinfo.email',
-                'https://www.googleapis.com/auth/userinfo.profile',
-                'openid'],
-        state=state
-    )
-    flow.redirect_uri = 'http://127.0.0.1/auth/v1/google/oauth2callback'
-
-    authorization_response = flask.request.url
-    flow.fetch_token(authorization_response=authorization_response)
-
-    credentials = flow.credentials
-
-    service = googleapiclient.discovery.build('people', API_VERSION,
-                                              credentials=credentials)
-
-    # Помимо создания приложения я открыл доступ к People API
-    # Через него мне было понятнее получить данные пользователя
-    # https://developers.google.com/people/v1/profiles?hl=en_US
-
-    profile = service.people().get(
-        resourceName='people/me',
-        personFields='names,emailAddresses'
-    ).execute()
+def authorize():
+    google = oauth.create_client('google')
+    token = google.authorize_access_token()
+    user = token['userinfo']
 
     profile_data = dict(
-        email=profile['emailAddresses'][0]['value'],
-        social_id=profile['resourceName'],
-        first_name=profile['names'][0]['givenName'],
-        last_name=profile['names'][0]['familyName']
+        email=user['email'],
+        social_id=user['sub'],
+        first_name=user['given_name'],
+        last_name=user['family_name']
     )
 
     # Выбор, логин или создание пользователя
     # происходит в функции social_create_or_login
-
+    # return redirect('/')
     return social_create_or_login(profile_data)

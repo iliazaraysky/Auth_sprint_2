@@ -209,3 +209,9 @@ def delete_user_role(user_uuid):
     db.session.commit()
 
     return jsonify(message='Role for User deleted')
+
+
+@blueprint.route('/usercheck')
+@jwt_required()
+def user_check():
+    return jsonify(message='Success')

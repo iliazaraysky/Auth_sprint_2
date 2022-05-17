@@ -7,6 +7,7 @@ from .settings import Config
 from flask_migrate import Migrate
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from authlib.integrations.flask_client import OAuth
 from .jaeger import configure_tracer
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 
@@ -15,6 +16,7 @@ jwt = JWTManager()
 migrate = Migrate()
 limiter = Limiter(key_func=get_remote_address, default_limits=['200/day', '50/hour'])
 configure_tracer()
+oauth = OAuth()
 
 
 def create_app_test(config=Config):
@@ -41,6 +43,7 @@ def create_app(config=Config):
     migrate.init_app(app, db)
     jwt.init_app(app)
     limiter.init_app(app)
+    oauth.init_app(app)
     FlaskInstrumentor().instrument_app(app)
 
     from api.v1.swagger import swagger_view
